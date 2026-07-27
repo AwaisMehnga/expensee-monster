@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@sqlite.org/sqlite-wasm": "3.53.0-build1",
     "@tailwindcss/vite": "^4.3.3",
     "lucide-react": "^1.26.0",
     "react": "^19.2.7",
