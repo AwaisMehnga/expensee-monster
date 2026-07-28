@@ -64,11 +64,6 @@
     overflow-x: hidden;
     line-height: 1.5;
   }
-
-  /* Bottom padding so content isn't hidden behind bottom nav */
-  #root {
-    padding-bottom: var(--bottom-nav-height);
-  }
 }
 
 /* ─────────────────────────────────────────────────────────

@@ -6,5 +6,5 @@ export * as budgets from './budgets'
 export * as analytics from './analytics'
 export * as settings from './settings'
 
-export { initDb, getDb, tx } from '../db/client'
+export { initDb, tx } from '../db/client'
 export type * from '../db/types'

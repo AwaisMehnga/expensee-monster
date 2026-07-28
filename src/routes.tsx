@@ -16,6 +16,7 @@ const Expenses = lazy(() => import('./screens/expenses'))
 const Wallet = lazy(() => import('./screens/wallet'))
 const Insights = lazy(() => import('./screens/insights'))
 const Settings = lazy(() => import('./screens/settings'))
+const Onboarding = lazy(() => import('./screens/onboarding'))
 
 // Custom metadata rides in `handle` — `nav`/`icon` drive the bottom nav (below),
 // so routes are the single source of truth for paths.
@@ -57,6 +58,11 @@ const routes: RouteObject[] = [
         handle: { name: 'Settings', title: 'Settings', nav: true, icon: SettingsIcon },
       },
     ],
+  },
+  // Full-screen, outside the Layout (no bottom nav)
+  {
+    path: '/onboarding',
+    element: <Onboarding />,
   },
 ]
 

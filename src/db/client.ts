@@ -1,69 +1,59 @@
-import sqlite3InitModule, {
-  type Database,
-  type SqlValue,
-} from '@sqlite.org/sqlite-wasm'
-import { MIGRATIONS } from './schema'
+import type { SqlValue } from '@sqlite.org/sqlite-wasm'
 
 type Row = Record<string, SqlValue>
 export type Params = SqlValue[]
+type Op = 'all' | 'get' | 'run' | 'insert'
 
-let dbPromise: Promise<Database> | null = null
-
-async function open(): Promise<Database> {
-  const sqlite3 = await sqlite3InitModule()
-  let db: Database
-  try {
-    // OPFS SAHPool: persistent, main-thread, no COOP/COEP headers needed.
-    const pool = await sqlite3.installOpfsSAHPoolVfs({
-      name: 'expensee-monster',
-      initialCapacity: 8,
-    })
-    db = new pool.OpfsSAHPoolDb('/expensee.sqlite3')
-  } catch (err) {
-    // Fallback keeps the app usable even where OPFS is unavailable (data won't persist).
-    console.warn('[db] OPFS unavailable — using in-memory database.', err)
-    db = new sqlite3.oo1.DB(':memory:')
-  }
-  db.exec('PRAGMA foreign_keys = ON')
-  migrate(db)
-  return db
+interface Pending {
+  resolve: (value: unknown) => void
+  reject: (error: unknown) => void
 }
 
-function migrate(db: Database) {
-  const row = db.selectObject('PRAGMA user_version') as Row | undefined
-  const current = Number(row?.user_version ?? 0)
-  for (let v = current; v < MIGRATIONS.length; v++) {
-    db.exec('BEGIN')
-    try {
-      db.exec(MIGRATIONS[v])
-      db.exec(`PRAGMA user_version = ${v + 1}`)
-      db.exec('COMMIT')
-    } catch (err) {
-      db.exec('ROLLBACK')
-      throw err
+let worker: Worker | null = null
+let seq = 0
+const pending = new Map<number, Pending>()
+
+function getWorker(): Worker {
+  if (!worker) {
+    worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = (ev: MessageEvent) => {
+      const { id, ok, result, error } = ev.data as {
+        id: number
+        ok: boolean
+        result?: unknown
+        error?: string
+      }
+      const p = pending.get(id)
+      if (!p) return
+      pending.delete(id)
+      if (ok) p.resolve(result)
+      else p.reject(new Error(error))
     }
+    worker.onerror = (e) => console.error('[db] worker error', e)
   }
+  return worker
 }
 
-/** Opens (once) and migrates the database. Safe to call repeatedly. */
-export function getDb(): Promise<Database> {
-  if (!dbPromise) dbPromise = open()
-  return dbPromise
+function call<T>(op: Op, sql: string, params: Params = []): Promise<T> {
+  const id = ++seq
+  return new Promise<T>((resolve, reject) => {
+    pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
+    getWorker().postMessage({ id, op, sql, params })
+  })
 }
 
-/** Awaitable "ensure ready" for app bootstrap. */
-export async function initDb(): Promise<void> {
-  await getDb()
+/** Warms up the worker + runs migrations. Safe to call repeatedly. */
+export function initDb(): Promise<void> {
+  return call<unknown>('run', 'SELECT 1').then(() => undefined)
 }
 
-export async function all<T = Row>(sql: string, params: Params = []): Promise<T[]> {
-  const db = await getDb()
-  return db.selectObjects(sql, params) as unknown as T[]
+export function all<T = Row>(sql: string, params: Params = []): Promise<T[]> {
+  return call<T[]>('all', sql, params)
 }
 
 export async function get<T = Row>(sql: string, params: Params = []): Promise<T | undefined> {
-  const db = await getDb()
-  return db.selectObject(sql, params) as unknown as T | undefined
+  const row = await call<T | null>('get', sql, params)
+  return row ?? undefined
 }
 
 export async function scalar<T extends SqlValue = SqlValue>(
@@ -74,29 +64,28 @@ export async function scalar<T extends SqlValue = SqlValue>(
   return row ? (Object.values(row)[0] as T) : undefined
 }
 
-export async function run(sql: string, params: Params = []): Promise<void> {
-  const db = await getDb()
-  db.exec({ sql, bind: params })
+export function run(sql: string, params: Params = []): Promise<void> {
+  return call<null>('run', sql, params).then(() => undefined)
 }
 
 /** Runs an INSERT and returns the new rowid. */
-export async function insert(sql: string, params: Params = []): Promise<number> {
-  const db = await getDb()
-  db.exec({ sql, bind: params })
-  const row = db.selectObject('SELECT last_insert_rowid() AS id') as Row | undefined
-  return Number(row?.id ?? 0)
+export function insert(sql: string, params: Params = []): Promise<number> {
+  return call<number>('insert', sql, params)
 }
 
-/** Wraps `fn` in a transaction; rolls back on throw. */
+/**
+ * Wraps `fn` in a transaction. Statements are serialized in the worker, so this
+ * is safe for the app's single-user access.
+ * ponytail: no nested/concurrent transactions — fine here; revisit if that changes.
+ */
 export async function tx<T>(fn: () => Promise<T> | T): Promise<T> {
-  const db = await getDb()
-  db.exec('BEGIN')
+  await run('BEGIN')
   try {
     const result = await fn()
-    db.exec('COMMIT')
+    await run('COMMIT')
     return result
   } catch (err) {
-    db.exec('ROLLBACK')
+    await run('ROLLBACK')
     throw err
   }
 }

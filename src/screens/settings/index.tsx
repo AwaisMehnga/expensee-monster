@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, Download, KeyRound } from 'lucide-react'
 import {
   Badge,
@@ -11,6 +11,9 @@ import {
   SelectMenu,
   Slider,
 } from '../../components/ui'
+import { useSettingsStore } from '../../store'
+import { DEFAULT_SETTINGS } from '../../services/settings'
+import { COUNTRIES, CURRENCIES } from '../../lib/regions'
 
 function Row({
   label,
@@ -33,16 +36,23 @@ function Row({
 }
 
 export default function SettingsScreen() {
-  const [country, setCountry] = useState('gb')
-  const [currency, setCurrency] = useState('gbp')
-  const [locale, setLocale] = useState('en-GB')
-  const [weekStart, setWeekStart] = useState<'mon' | 'sun'>('mon')
+  const loaded = useSettingsStore((s) => s.loaded)
+  const load = useSettingsStore((s) => s.load)
+  const save = useSettingsStore((s) => s.save)
+  const setHue = useSettingsStore((s) => s.setHue)
+  const settings = useSettingsStore((s) => s.settings) ?? DEFAULT_SETTINGS
 
-  const [provider, setProvider] = useState('openai')
-  const [model, setModel] = useState('gpt-4o-mini')
-  const [apiKey, setApiKey] = useState('')
+  useEffect(() => {
+    if (!loaded) void load()
+  }, [loaded, load])
 
-  const [hue, setHue] = useState(270)
+  // Mirror free-text inputs locally for snappy typing, then persist on change.
+  const [model, setModel] = useState(settings.model)
+  const [apiKey, setApiKey] = useState(settings.apiKey)
+  useEffect(() => {
+    setModel(settings.model)
+    setApiKey(settings.apiKey)
+  }, [settings.model, settings.apiKey])
 
   return (
     <Screen>
@@ -60,14 +70,10 @@ export default function SettingsScreen() {
               control={
                 <div className="w-44">
                   <SelectMenu
-                    value={country}
-                    onChange={setCountry}
-                    options={[
-                      { value: 'gb', label: 'United Kingdom' },
-                      { value: 'us', label: 'United States' },
-                      { value: 'de', label: 'Germany' },
-                      { value: 'in', label: 'India' },
-                    ]}
+                    searchable
+                    value={settings.country}
+                    onChange={(country) => void save({ country })}
+                    options={COUNTRIES}
                   />
                 </div>
               }
@@ -77,14 +83,10 @@ export default function SettingsScreen() {
               control={
                 <div className="w-44">
                   <SelectMenu
-                    value={currency}
-                    onChange={setCurrency}
-                    options={[
-                      { value: 'gbp', label: 'GBP £' },
-                      { value: 'usd', label: 'USD $' },
-                      { value: 'eur', label: 'EUR €' },
-                      { value: 'inr', label: 'INR ₹' },
-                    ]}
+                    searchable
+                    value={settings.currency}
+                    onChange={(currency) => void save({ currency })}
+                    options={CURRENCIES}
                   />
                 </div>
               }
@@ -95,10 +97,11 @@ export default function SettingsScreen() {
               control={
                 <div className="w-44">
                   <SelectMenu
-                    value={locale}
-                    onChange={setLocale}
+                    value={settings.locale}
+                    onChange={(locale) => void save({ locale })}
                     options={[
-                      { value: 'en-GB', label: '1,234.56' },
+                      { value: 'en-US', label: '1,234.56 (US)' },
+                      { value: 'en-GB', label: '1,234.56 (UK)' },
                       { value: 'de-DE', label: '1.234,56' },
                       { value: 'en-IN', label: '1,23,456' },
                     ]}
@@ -111,8 +114,8 @@ export default function SettingsScreen() {
               control={
                 <SegmentedControl
                   size="sm"
-                  value={weekStart}
-                  onChange={setWeekStart}
+                  value={settings.weekStart}
+                  onChange={(weekStart) => void save({ weekStart })}
                   options={[
                     { value: 'mon', label: 'Mon' },
                     { value: 'sun', label: 'Sun' },
@@ -132,8 +135,8 @@ export default function SettingsScreen() {
               control={
                 <div className="w-44">
                   <SelectMenu
-                    value={provider}
-                    onChange={setProvider}
+                    value={settings.provider}
+                    onChange={(provider) => void save({ provider })}
                     options={[
                       { value: 'openai', label: 'OpenAI' },
                       { value: 'gemini', label: 'Gemini' },
@@ -152,6 +155,7 @@ export default function SettingsScreen() {
                   <Input
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
+                    onBlur={() => void save({ model })}
                     placeholder="model id"
                   />
                 </div>
@@ -165,6 +169,7 @@ export default function SettingsScreen() {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              onBlur={() => void save({ apiKey })}
               placeholder="sk-..."
               leftIcon={<KeyRound className="h-4 w-4" />}
               helperText="Keys are stored locally on this device and never leave it."
@@ -206,7 +211,7 @@ export default function SettingsScreen() {
               </div>
               <span
                 className="h-9 w-9 shrink-0 rounded-full border border-border-default"
-                style={{ backgroundColor: `hsl(${hue} 70% 55%)` }}
+                style={{ backgroundColor: `hsl(${settings.themeHue} 70% 55%)` }}
                 aria-hidden
               />
             </div>
@@ -215,16 +220,16 @@ export default function SettingsScreen() {
                 min={0}
                 max={360}
                 step={1}
-                value={hue}
-                valueDisplay={`${hue}°`}
-                onChange={(e) => setHue(Number(e.target.value))}
+                value={settings.themeHue}
+                valueDisplay={`${settings.themeHue}°`}
+                onChange={(e) => void setHue(Number(e.target.value))}
               />
             </div>
           </div>
         </section>
 
         <div className="pt-10">
-          <Button variant="primary" fullWidth>
+          <Button variant="primary" fullWidth onClick={() => void save(settings)}>
             Save settings
           </Button>
         </div>

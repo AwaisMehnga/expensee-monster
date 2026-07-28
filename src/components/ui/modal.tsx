@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { Button } from './button'
 
@@ -44,8 +45,8 @@ export const Modal: React.FC<ModalProps> = ({
     full: 'max-w-4xl',
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+  return createPortal(
+    <div className="fixed inset-0 z-60 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-overlay-backdrop transition-opacity animate-fade-in"
@@ -82,7 +83,8 @@ export const Modal: React.FC<ModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -101,8 +103,8 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 }) => {
   if (!isOpen) return null
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+  return createPortal(
+    <div className="fixed inset-0 z-60 flex flex-col justify-end">
       <div
         className="fixed inset-0 bg-overlay-backdrop transition-opacity"
         onClick={onClose}
@@ -112,7 +114,8 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
         {title && <h3 className="text-lg font-bold text-text-primary mb-4 text-center">{title}</h3>}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

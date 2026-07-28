@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, Search } from 'lucide-react'
 
 export interface SelectMenuOption<T extends string = string> {
   value: T
@@ -14,6 +14,7 @@ export interface SelectMenuProps<T extends string = string> {
   onChange: (value: T) => void
   placeholder?: string
   disabled?: boolean
+  searchable?: boolean
   align?: 'left' | 'right'
   className?: string
 }
@@ -24,16 +25,29 @@ export function SelectMenu<T extends string = string>({
   onChange,
   placeholder = 'Select…',
   disabled = false,
+  searchable = false,
   align = 'left',
   className = '',
 }: SelectMenuProps<T>) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   const selected = options.find((o) => o.value === value) ?? null
 
+  const filtered = useMemo(() => {
+    if (!searchable || !query.trim()) return options
+    const q = query.toLowerCase()
+    return options.filter(
+      (o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q),
+    )
+  }, [options, query, searchable])
+
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setQuery('')
+      return
+    }
     const onClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
@@ -68,45 +82,62 @@ export function SelectMenu<T extends string = string>({
       </button>
 
       {open && (
-        <ul
-          role="listbox"
-          className={`absolute z-50 mt-2 max-h-64 w-full min-w-[10rem] animate-scale-up overflow-auto rounded-2xl border border-border-default bg-surface-raised p-1.5 shadow-lg ${
+        <div
+          className={`absolute z-50 mt-2 w-full min-w-40 animate-scale-up overflow-hidden rounded-2xl border border-border-default bg-surface-raised shadow-lg ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
         >
-          {options.map((opt) => {
-            const active = opt.value === value
-            return (
-              <li key={opt.value}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={active}
-                  onClick={() => {
-                    onChange(opt.value)
-                    setOpen(false)
-                  }}
-                  className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors ${
-                    active
-                      ? 'bg-primary-50 text-primary-700'
-                      : 'text-text-secondary hover:bg-primary-50 hover:text-text-primary'
-                  }`}
-                >
-                  {opt.icon && <span className="shrink-0">{opt.icon}</span>}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{opt.label}</span>
-                    {opt.description && (
-                      <span className="block truncate text-xs font-normal text-text-muted">
-                        {opt.description}
+          {searchable && (
+            <div className="flex items-center gap-2 border-b border-border-default px-3 py-2">
+              <Search className="h-4 w-4 shrink-0 text-text-muted" />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search…"
+                className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none"
+              />
+            </div>
+          )}
+          <ul role="listbox" className="max-h-60 overflow-auto p-1.5">
+            {filtered.length ? (
+              filtered.map((opt) => {
+                const active = opt.value === value
+                return (
+                  <li key={opt.value}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      onClick={() => {
+                        onChange(opt.value)
+                        setOpen(false)
+                      }}
+                      className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors ${
+                        active
+                          ? 'bg-primary-50 text-primary-700'
+                          : 'text-text-secondary hover:bg-primary-50 hover:text-text-primary'
+                      }`}
+                    >
+                      {opt.icon && <span className="shrink-0">{opt.icon}</span>}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{opt.label}</span>
+                        {opt.description && (
+                          <span className="block truncate text-xs font-normal text-text-muted">
+                            {opt.description}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                  {active && <Check className="h-4 w-4 shrink-0 text-primary-600" />}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+                      {active && <Check className="h-4 w-4 shrink-0 text-primary-600" />}
+                    </button>
+                  </li>
+                )
+              })
+            ) : (
+              <li className="px-3 py-3 text-sm text-text-muted">No matches</li>
+            )}
+          </ul>
+        </div>
       )}
     </div>
   )

@@ -1,88 +1,126 @@
-import { useMemo, useState } from 'react'
-import { SlidersHorizontal } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Plus, Receipt, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
+  Button,
+  DatePicker,
+  EmptyState,
   Eyebrow,
+  Input,
+  LoadingSpinner,
+  Modal,
   ProgressBar,
   Screen,
   ScreenHeader,
   SearchBar,
   SegmentedControl,
+  SelectMenu,
 } from '../../components/ui'
-import { formatAmount, formatMoney } from '../../lib/format'
-
-type ExpenseRow = {
-  id: string
-  emoji: string
-  name: string
-  merchant: string
-  category: string
-  amount: number
-  time: string
-}
-
-const expenseRows: ExpenseRow[] = [
-  { id: '1', emoji: '☕', name: 'Flat white', merchant: 'Corner Cafe', category: 'Food', amount: 4.8, time: 'Today · 8:12 AM' },
-  { id: '2', emoji: '🛒', name: 'Weekly shop', merchant: 'Metro Market', category: 'Groceries', amount: 18.4, time: 'Today · 11:05 AM' },
-  { id: '3', emoji: '🚕', name: 'Ride home', merchant: 'Uber', category: 'Transport', amount: 12.1, time: 'Yesterday · 6:40 PM' },
-  { id: '4', emoji: '💿', name: 'Paperless Pro', merchant: 'Subscription', category: 'Software', amount: 9.0, time: 'Mon · Monthly' },
-  { id: '5', emoji: '🍜', name: 'Ramen night', merchant: 'Ippudo', category: 'Food', amount: 21.5, time: 'Sun · 7:20 PM' },
-  { id: '6', emoji: '🎬', name: 'Movie tickets', merchant: 'Odeon', category: 'Fun', amount: 15.0, time: 'Sat · 8:00 PM' },
-]
-
-const categories = ['All', 'Food', 'Groceries', 'Transport', 'Software', 'Fun']
-
-// Simple monthly totals for the trend line (mock).
-const trend = [320, 280, 410, 360, 300, 344]
-const trendMonths = ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul']
+import { formatCents } from '../../lib/format'
+import { useCategoriesStore, useExpensesStore, useSettingsStore } from '../../store'
 
 const periodOptions = [
+  { value: 'all', label: 'All' },
   { value: 'week', label: 'Week' },
   { value: 'month', label: 'Month' },
   { value: 'year', label: 'Year' },
 ]
 
+// week/month/year → { from, to } ISO; 'all' clears the range.
+function periodRange(period: string): { from?: string; to?: string } {
+  if (period === 'all') return { from: undefined, to: undefined }
+  const now = new Date()
+  const from = new Date(now)
+  if (period === 'week') from.setDate(now.getDate() - 7)
+  else if (period === 'month') from.setMonth(now.getMonth() - 1)
+  else if (period === 'year') from.setFullYear(now.getFullYear() - 1)
+  return { from: from.toISOString(), to: now.toISOString() }
+}
+
+const shortDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
 export default function ExpensesScreen() {
-  const [query, setQuery] = useState('')
+  const load = useExpensesStore((s) => s.load)
+  const loadCategories = useCategoriesStore((s) => s.load)
+  useEffect(() => {
+    void load()
+  }, [load])
+  useEffect(() => {
+    void loadCategories()
+  }, [loadCategories])
+
+  const items = useExpensesStore((s) => s.items)
+  const total = useExpensesStore((s) => s.total)
+  const byCategory = useExpensesStore((s) => s.byCategory)
+  const trend = useExpensesStore((s) => s.trend)
+  const filter = useExpensesStore((s) => s.filter)
+  const loading = useExpensesStore((s) => s.loading)
+  const setFilter = useExpensesStore((s) => s.setFilter)
+  const addExpense = useExpensesStore((s) => s.add)
+  const removeExpense = useExpensesStore((s) => s.remove)
+  const categories = useCategoriesStore((s) => s.items)
+  const currency = useSettingsStore((s) => s.settings?.currency ?? 'USD')
+
   const [period, setPeriod] = useState('month')
-  const [category, setCategory] = useState('All')
 
-  const visibleRows = useMemo(() => {
-    const q = query.toLowerCase()
-    return expenseRows.filter((row) => {
-      const matchesCat = category === 'All' || row.category === category
-      const matchesQuery = `${row.name} ${row.merchant} ${row.category}`.toLowerCase().includes(q)
-      return matchesCat && matchesQuery
-    })
-  }, [query, category])
+  // Add-expense modal state
+  const [open, setOpen] = useState(false)
+  const [item, setItem] = useState('')
+  const [amount, setAmount] = useState('')
+  const [catId, setCatId] = useState<string | null>(null)
+  const [date, setDate] = useState<Date | null>(null)
 
-  const total = useMemo(() => visibleRows.reduce((sum, r) => sum + r.amount, 0), [visibleRows])
+  const onPeriod = (value: string) => {
+    setPeriod(value)
+    setFilter(periodRange(value))
+  }
 
-  // Build the single-stroke trend polyline over a 300x80 viewbox.
+  // Trend polyline over a 300x80 viewbox; hidden when <2 points.
   const points = useMemo(() => {
-    const max = Math.max(...trend)
-    const min = Math.min(...trend)
+    if (trend.length < 2) return ''
+    const values = trend.map((t) => t.total_cents)
+    const max = Math.max(...values)
+    const min = Math.min(...values)
     const span = max - min || 1
-    return trend
+    return values
       .map((v, i) => {
-        const x = (i / (trend.length - 1)) * 300
+        const x = (i / (values.length - 1)) * 300
         const y = 72 - ((v - min) / span) * 64
         return `${x.toFixed(1)},${y.toFixed(1)}`
       })
       .join(' ')
-  }, [])
+  }, [trend])
+
+  const maxCategory = Math.max(1, ...byCategory.map((c) => c.total_cents))
+
+  const submit = async () => {
+    if (!item.trim() || !amount) return
+    await addExpense({
+      item: item.trim(),
+      amount_cents: Math.round(Number(amount) * 100),
+      category_id: catId ? Number(catId) : undefined,
+      spent_at: date ? date.toISOString() : undefined,
+      source: 'manual',
+    })
+    setItem('')
+    setAmount('')
+    setCatId(null)
+    setDate(null)
+    setOpen(false)
+  }
 
   return (
     <Screen>
-      {/* Header */}
       <ScreenHeader
         action={
           <button
             type="button"
+            onClick={() => setOpen(true)}
             className="rounded-full p-2 text-text-muted transition-colors hover:bg-primary-50 hover:text-text-primary"
-            aria-label="Filter expenses"
+            aria-label="Add expense"
           >
-            <SlidersHorizontal className="h-5 w-5" />
+            <Plus className="h-5 w-5" />
           </button>
         }
       />
@@ -90,105 +128,126 @@ export default function ExpensesScreen() {
       {/* Hero — total spent + period pills */}
       <section className="pt-8">
         <div className="flex items-center justify-between gap-4">
-          <Eyebrow>Spent this {period}</Eyebrow>
-          <SegmentedControl
-            size="sm"
-            options={periodOptions}
-            value={period}
-            onChange={setPeriod}
-          />
+          <Eyebrow>Spent this {period === 'all' ? 'period' : period}</Eyebrow>
+          <SegmentedControl size="sm" options={periodOptions} value={period} onChange={onPeriod} />
         </div>
         <p className="mt-3 text-5xl font-extrabold tracking-tight tabular-nums">
-          <span className="text-primary-600">$</span>
-          {formatAmount(total)}
+          {formatCents(total, currency)}
         </p>
 
-        {/* Single-stroke trend line */}
-        <div className="mt-6">
-          <svg viewBox="0 0 300 80" className="h-20 w-full" preserveAspectRatio="none">
-            <polyline
-              points={points}
-              fill="none"
-              stroke="var(--primary-500)"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          </svg>
-          <div className="mt-2 flex justify-between text-[11px] font-medium text-text-muted">
-            {trendMonths.map((m) => (
-              <span key={m}>{m}</span>
-            ))}
+        {points && (
+          <div className="mt-6">
+            <svg viewBox="0 0 300 80" className="h-20 w-full" preserveAspectRatio="none">
+              <polyline
+                points={points}
+                fill="none"
+                stroke="var(--primary-500)"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
           </div>
-        </div>
+        )}
       </section>
 
       {/* Search + category chips */}
       <section className="pt-10">
         <SearchBar
-          value={query}
-          onChange={setQuery}
-          onClear={() => setQuery('')}
-          placeholder="Search expenses, merchants, categories..."
+          value={filter.search ?? ''}
+          onChange={(v) => setFilter({ search: v })}
+          onClear={() => setFilter({ search: '' })}
+          placeholder="Search expenses, places, items..."
         />
         <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setFilter({ categoryId: undefined })}
+            className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+              filter.categoryId == null
+                ? 'bg-primary-500 text-white'
+                : 'border border-border-default text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            All
+          </button>
           {categories.map((cat) => {
-            const active = cat === category
+            const active = filter.categoryId === cat.id
             return (
               <button
-                key={cat}
+                key={cat.id}
                 type="button"
-                onClick={() => setCategory(cat)}
+                onClick={() => setFilter({ categoryId: cat.id })}
                 className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
                   active
                     ? 'bg-primary-500 text-white'
                     : 'border border-border-default text-text-secondary hover:text-text-primary'
                 }`}
               >
-                {cat}
+                {cat.name}
               </button>
             )
           })}
         </div>
       </section>
 
-      {/* Transaction list — hairline rows */}
+      {/* Transaction list */}
       <section className="pt-10">
         <Eyebrow>Transactions</Eyebrow>
-        {visibleRows.length ? (
+        {loading ? (
+          <LoadingSpinner />
+        ) : items.length ? (
           <ul className="mt-3 divide-y divide-border-default">
-            {visibleRows.map((row) => (
-              <li key={row.id} className="flex items-center gap-3 py-4">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-50 text-lg">
-                  {row.emoji}
+            {items.map((row) => (
+              <li key={row.id} className="group flex items-center gap-3 py-4">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-50 text-primary-600">
+                  <Receipt className="h-5 w-5" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-text-primary">{row.name}</p>
-                  <p className="truncate text-xs text-text-muted">{row.merchant}</p>
+                  <p className="truncate font-semibold text-text-primary">{row.item}</p>
+                  {row.place && <p className="truncate text-xs text-text-muted">{row.place}</p>}
                 </div>
                 <div className="text-right">
-                  <p className="font-bold tabular-nums text-text-primary">{formatMoney(row.amount)}</p>
-                  <p className="text-[11px] text-text-muted">{row.time}</p>
+                  <p className="font-bold tabular-nums text-text-primary">
+                    {formatCents(row.amount_cents, currency)}
+                  </p>
+                  <p className="text-[11px] text-text-muted">{shortDate(row.spent_at)}</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void removeExpense(row.id)}
+                  className="rounded-full p-1.5 text-text-muted opacity-0 transition-opacity hover:text-status-danger group-hover:opacity-100"
+                  aria-label="Delete expense"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-sm text-text-muted">No expenses match your filters.</p>
+          <EmptyState title="No expenses yet" description="Add one with the + button above." />
         )}
       </section>
 
       {/* Category breakdown */}
-      <section className="pt-10">
-        <Eyebrow>Where it went</Eyebrow>
-        <div className="mt-4 space-y-4">
-          <ProgressBar value={72} label="Food & dining" sublabel="$32.80" color="primary" />
-          <ProgressBar value={44} label="Groceries" sublabel="$18.40" color="primary" />
-          <ProgressBar value={30} label="Transport" sublabel="$12.10" color="primary" />
-          <ProgressBar value={22} label="Software" sublabel="$9.00" color="primary" />
-        </div>
-      </section>
+      {byCategory.length > 0 && (
+        <section className="pt-10">
+          <Eyebrow>Where it went</Eyebrow>
+          <div className="mt-4 space-y-4">
+            {byCategory.map((c) => (
+              <ProgressBar
+                key={c.category_id ?? 'none'}
+                value={c.total_cents}
+                max={maxCategory}
+                label={c.category_name ?? 'Uncategorized'}
+                sublabel={formatCents(c.total_cents, currency)}
+                color="primary"
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <Link
         to="/insights"
@@ -196,6 +255,48 @@ export default function ExpensesScreen() {
       >
         See full breakdown in Insights
       </Link>
+
+      {/* Add expense */}
+      <Modal
+        isOpen={open}
+        onClose={() => setOpen(false)}
+        title="Add expense"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => void submit()} disabled={!item.trim() || !amount}>
+              Add
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Input label="Item" value={item} onChange={(e) => setItem(e.target.value)} placeholder="Flat white" />
+          <Input
+            label="Amount"
+            type="number"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+          />
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-text-secondary">Category</label>
+            <SelectMenu
+              options={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+              value={catId}
+              onChange={setCatId}
+              placeholder="Optional"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-text-secondary">Date</label>
+            <DatePicker value={date} onChange={setDate} placeholder="Optional (defaults to now)" />
+          </div>
+        </div>
+      </Modal>
     </Screen>
   )
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export interface QuickDateFilterProps {
@@ -74,15 +75,45 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 }) => {
   const [open, setOpen] = useState(false)
   const [view, setView] = useState(() => value ?? new Date())
-  const ref = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const onClickOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    if (!open) return
+    const place = () => {
+      const el = triggerRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const width = 288 // 18rem
+      const panelH = 340
+      const openUp = window.innerHeight - r.bottom < panelH && r.top > panelH
+      setCoords({
+        top: openUp ? r.top - panelH - 8 : r.bottom + 8,
+        left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+        width,
+      })
     }
+    place()
+    const onClickOutside = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (triggerRef.current?.contains(t) || panelRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
     document.addEventListener('mousedown', onClickOutside)
-    return () => document.removeEventListener('mousedown', onClickOutside)
-  }, [])
+    document.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+      document.removeEventListener('mousedown', onClickOutside)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
   const year = view.getFullYear()
   const month = view.getMonth()
@@ -100,8 +131,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   ]
 
   return (
-    <div className={`relative ${className}`} ref={ref}>
+    <div className={className}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-left text-sm font-semibold text-text-primary transition-colors hover:border-border-strong focus:outline-none focus:ring-2 focus:ring-primary-500/40"
@@ -112,8 +144,13 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         </span>
       </button>
 
-      {open && (
-        <div className="absolute z-50 mt-2 w-72 animate-scale-up rounded-2xl border border-border-default bg-surface-raised p-3 shadow-md">
+      {open && coords &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{ position: 'fixed', top: coords.top, left: coords.left, width: coords.width }}
+            className="z-70 animate-scale-up rounded-2xl border border-border-default bg-surface-raised p-3 shadow-lg"
+          >
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"
@@ -171,8 +208,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               )
             })}
           </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
