@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
   budgets as api,
+  type Budget,
   type BudgetPatch,
   type BudgetStatus,
   type ID,
@@ -11,6 +12,7 @@ import {
 const weekStartsOn = (weekStart: WeekStart): 0 | 1 => (weekStart === 'sun' ? 0 : 1)
 
 interface BudgetsState {
+  budgets: Budget[]
   statuses: BudgetStatus[]
   loading: boolean
   load: (weekStart?: WeekStart) => Promise<void>
@@ -20,11 +22,20 @@ interface BudgetsState {
 }
 
 export const useBudgetsStore = create<BudgetsState>((set, get) => ({
+  budgets: [],
   statuses: [],
   loading: false,
   load: async (weekStart = 'mon') => {
     set({ loading: true })
-    set({ statuses: await api.listBudgetStatuses(weekStartsOn(weekStart)), loading: false })
+    try {
+      const [budgets, statuses] = await Promise.all([
+        api.listBudgets(),
+        api.listBudgetStatuses(weekStartsOn(weekStart)),
+      ])
+      set({ budgets, statuses })
+    } finally {
+      set({ loading: false })
+    }
   },
   create: async (input) => {
     await api.createBudget(input)

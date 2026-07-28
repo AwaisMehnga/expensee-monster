@@ -1,31 +1,23 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Button, ConfirmDialog, Eyebrow, Input, LoadingSpinner } from '../../components/ui'
+import { ConfirmDialog, Eyebrow, LoadingSpinner } from '../../components/ui'
 import { useCategoriesStore } from '../../store'
 import type { Category } from '../../services'
+import { AddCategorySheet } from './add-category-sheet'
 
 export default function CategoriesTab() {
   const categories = useCategoriesStore((s) => s.items)
   const loading = useCategoriesStore((s) => s.loading)
   const load = useCategoriesStore((s) => s.load)
-  const add = useCategoriesStore((s) => s.add)
   const remove = useCategoriesStore((s) => s.remove)
 
   useEffect(() => {
     void load()
   }, [load])
 
-  const [name, setName] = useState('')
-  const [emoji, setEmoji] = useState('')
+  const [showAdd, setShowAdd] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Category | null>(null)
   const [deleting, setDeleting] = useState(false)
-
-  const submit = async () => {
-    if (!name.trim()) return
-    await add(name.trim(), emoji.trim() || null)
-    setName('')
-    setEmoji('')
-  }
 
   const confirmDelete = async () => {
     if (!pendingDelete) return
@@ -70,6 +62,16 @@ export default function CategoriesTab() {
         )}
       </div>
 
+      <button
+        type="button"
+        onClick={() => setShowAdd(true)}
+        className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong py-3 text-sm font-semibold text-primary-600 transition-colors hover:bg-primary-50"
+      >
+        <Plus className="h-4 w-4" /> New category
+      </button>
+
+      <AddCategorySheet isOpen={showAdd} onClose={() => setShowAdd(false)} />
+
       <ConfirmDialog
         isOpen={!!pendingDelete}
         onClose={() => setPendingDelete(null)}
@@ -81,19 +83,6 @@ export default function CategoriesTab() {
         isDanger
         isLoading={deleting}
       />
-
-      {/* Inline add — no popup */}
-      <div className="mt-4 flex items-end gap-2 rounded-2xl border border-border-default p-3">
-        <div className="w-14 shrink-0">
-          <Input value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="🏷️" className="text-center" />
-        </div>
-        <div className="flex-1">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New category" />
-        </div>
-        <Button variant="primary" onClick={submit} disabled={!name.trim()} leftIcon={<Plus className="h-4 w-4" />}>
-          Add
-        </Button>
-      </div>
     </div>
   )
 }

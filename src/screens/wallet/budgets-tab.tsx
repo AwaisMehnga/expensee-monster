@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import {
+  BottomSheet,
   Button,
   Eyebrow,
   Input,
@@ -9,28 +10,47 @@ import {
   SegmentedControl,
 } from '../../components/ui'
 import { useBudgetsStore, useCategoriesStore, useSettingsStore } from '../../store'
+import { analytics, type Budget, type Category } from '../../services'
 import { formatCents } from '../../lib/format'
-import type { PeriodType } from '../../services'
-import { AddSection, Chips, toCents } from './shared'
+import { periodWindow, toISODate } from '../../lib/dates'
+import { toCents } from './shared'
+import { AddCategorySheet } from './add-category-sheet'
 
-const PERIODS = [
+type Period = 'day' | 'week' | 'month'
+
+const PERIOD_TABS = [
   { value: 'day', label: 'Day' },
   { value: 'week', label: 'Week' },
   { value: 'month', label: 'Month' },
-  { value: 'year', label: 'Year' },
 ]
+
+const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+const shortDate = (iso: string) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
 export default function BudgetsTab() {
   const currency = useSettingsStore((s) => s.settings?.currency ?? 'USD')
   const weekStart = useSettingsStore((s) => s.settings?.weekStart)
-  const statuses = useBudgetsStore((s) => s.statuses)
-  const loading = useBudgetsStore((s) => s.loading)
+  const weekStartsOn: 0 | 1 = weekStart === 'sun' ? 0 : 1
+
+  const budgets = useBudgetsStore((s) => s.budgets)
   const load = useBudgetsStore((s) => s.load)
   const create = useBudgetsStore((s) => s.create)
+  const update = useBudgetsStore((s) => s.update)
   const remove = useBudgetsStore((s) => s.remove)
   const categories = useCategoriesStore((s) => s.items)
+  const categoriesLoading = useCategoriesStore((s) => s.loading)
   const loadCategories = useCategoriesStore((s) => s.load)
-  const addCategory = useCategoriesStore((s) => s.add)
+
+  const [period, setPeriod] = useState<Period>('month')
+  const [ref, setRef] = useState(() => new Date())
+  const [spendMap, setSpendMap] = useState<Record<number, number>>({})
+  const [totalSpent, setTotalSpent] = useState(0)
+
+  // Sheets
+  const [sheetCat, setSheetCat] = useState<Category | null>(null)
+  const [amountInput, setAmountInput] = useState('')
+  const [showAddCategory, setShowAddCategory] = useState(false)
 
   useEffect(() => {
     void load(weekStart)
@@ -39,126 +59,247 @@ export default function BudgetsTab() {
     void loadCategories()
   }, [loadCategories])
 
-  const [showAdd, setShowAdd] = useState(false)
-  const [amount, setAmount] = useState('')
-  const [period, setPeriod] = useState<PeriodType>('month')
-  const [categoryId, setCategoryId] = useState('') // '' = overall
+  const win = useMemo(
+    () => periodWindow(period, ref, { weekStartsOn }),
+    [period, ref, weekStartsOn],
+  )
 
-  const [showNewCat, setShowNewCat] = useState(false)
-  const [newCatName, setNewCatName] = useState('')
-  const [newCatEmoji, setNewCatEmoji] = useState('')
-
-  const categoryName = (id: number | null) => categories.find((c) => c.id === id)?.name ?? 'Overall'
-
-  const categoryChips = [
-    { value: '', label: 'Overall' },
-    ...categories.map((c) => ({ value: String(c.id), label: `${c.icon ? `${c.icon} ` : ''}${c.name}` })),
-  ]
-
-  const createNewCategory = async () => {
-    if (!newCatName.trim()) return
-    const cat = await addCategory(newCatName.trim(), newCatEmoji.trim() || null)
-    setCategoryId(String(cat.id))
-    setNewCatName('')
-    setNewCatEmoji('')
-    setShowNewCat(false)
-  }
-
-  const submit = async () => {
-    if (toCents(amount) <= 0) return
-    await create({
-      amount_cents: toCents(amount),
-      period_type: period,
-      category_id: categoryId ? Number(categoryId) : null,
+  // Spend for the active window.
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      analytics.spendByCategory({ from: win.start, to: win.end }),
+      analytics.totalSpent({ from: win.start, to: win.end }),
+    ]).then(([byCat, total]) => {
+      if (cancelled) return
+      const map: Record<number, number> = {}
+      for (const row of byCat) if (row.category_id != null) map[row.category_id] = row.total_cents
+      setSpendMap(map)
+      setTotalSpent(total)
     })
-    setAmount('')
-    setPeriod('month')
-    setCategoryId('')
-    setShowAdd(false)
+    return () => {
+      cancelled = true
+    }
+  }, [win, budgets])
+
+  // Budgets for the selected period → category_id → budget
+  const budgetByCat = useMemo(() => {
+    const m = new Map<number, Budget>()
+    for (const b of budgets) if (b.period_type === period && b.category_id != null) m.set(b.category_id, b)
+    return m
+  }, [budgets, period])
+
+  const totalBudget = useMemo(
+    () => [...budgetByCat.values()].reduce((sum, b) => sum + b.amount_cents, 0),
+    [budgetByCat],
+  )
+
+  const budgeted = categories.filter((c) => budgetByCat.has(c.id))
+  const notBudgeted = categories.filter((c) => !budgetByCat.has(c.id))
+
+  const label =
+    period === 'month'
+      ? ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      : period === 'week'
+      ? `${shortDate(win.start)} – ${shortDate(win.end)}`
+      : ref.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+  const shift = (delta: number) => {
+    setRef((d) =>
+      period === 'month'
+        ? new Date(d.getFullYear(), d.getMonth() + delta, 1)
+        : addDays(d, delta * (period === 'week' ? 7 : 1)),
+    )
   }
+
+  const openSheet = (c: Category) => {
+    const existing = budgetByCat.get(c.id)
+    setSheetCat(c)
+    setAmountInput(existing ? String(existing.amount_cents / 100) : '')
+  }
+  const closeSheet = () => setSheetCat(null)
+  const existingBudget = sheetCat ? budgetByCat.get(sheetCat.id) : undefined
+
+  const saveBudget = async () => {
+    if (!sheetCat || toCents(amountInput) <= 0) return
+    if (existingBudget) await update(existingBudget.id, { amount_cents: toCents(amountInput) })
+    else
+      await create({
+        amount_cents: toCents(amountInput),
+        period_type: period,
+        category_id: sheetCat.id,
+        start_date: toISODate(ref),
+      })
+    closeSheet()
+  }
+  const removeBudget = async () => {
+    if (existingBudget) await remove(existingBudget.id)
+    closeSheet()
+  }
+
+  const CategoryIcon = ({ icon }: { icon: string | null }) => (
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-50 text-lg">
+      {icon ?? '🏷️'}
+    </span>
+  )
 
   return (
     <div>
-      <Eyebrow>Budgets</Eyebrow>
-      <div className="pt-4">
-        {loading && statuses.length === 0 ? (
-          <LoadingSpinner />
-        ) : statuses.length === 0 ? (
-          <p className="rounded-2xl border border-border-default p-4 text-sm text-text-muted">
-            No budgets yet — add one below to start pacing your spending.
-          </p>
-        ) : (
-          <div className="space-y-6">
-            {statuses.map((s) => {
-              const pct = Math.min(100, Math.round((s.spent_cents / s.budget.amount_cents) * 100))
-              return (
-                <div key={s.budget.id}>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <p className="font-semibold text-text-primary">{categoryName(s.budget.category_id)}</p>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs capitalize text-text-muted">{s.budget.period_type}</span>
-                      <button
-                        type="button"
-                        onClick={() => remove(s.budget.id)}
-                        className="rounded-lg p-1 text-text-muted hover:bg-primary-50 hover:text-status-danger"
-                        aria-label="Delete budget"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <ProgressBar
-                      value={pct}
-                      label={`${formatCents(s.spent_cents, currency)} of ${formatCents(s.budget.amount_cents, currency)}`}
-                      color={pct >= 90 ? 'danger' : 'primary'}
-                    />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+      {/* Period toggle */}
+      <SegmentedControl
+        fullWidth
+        options={PERIOD_TABS}
+        value={period}
+        onChange={(v) => setPeriod(v as Period)}
+      />
+
+      {/* Navigator */}
+      <div className="mt-4 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => shift(-1)}
+          className="rounded-full p-2 text-text-muted transition-colors hover:bg-primary-50 hover:text-text-primary"
+          aria-label="Previous"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <p className="text-lg font-bold tracking-tight">{label}</p>
+        <button
+          type="button"
+          onClick={() => shift(1)}
+          className="rounded-full p-2 text-text-muted transition-colors hover:bg-primary-50 hover:text-text-primary"
+          aria-label="Next"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
       </div>
 
-      <AddSection label="New budget" open={showAdd} onToggle={() => setShowAdd((o) => !o)}>
-        <Input label="Amount" type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
-
-        <div className="space-y-1.5">
-          <span className="text-xs font-semibold text-text-muted">Period</span>
-          <SegmentedControl fullWidth options={PERIODS} value={period} onChange={(v) => setPeriod(v as PeriodType)} />
+      {/* Totals */}
+      <div className="mt-5 grid grid-cols-2 divide-x divide-border-default border-y border-border-default">
+        <div className="py-4 pr-4">
+          <Eyebrow>Total budget</Eyebrow>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums">{formatCents(totalBudget, currency)}</p>
         </div>
+        <div className="py-4 pl-4">
+          <Eyebrow>Total spent</Eyebrow>
+          <p
+            className={`mt-1 text-2xl font-extrabold tabular-nums ${
+              totalBudget > 0 && totalSpent > totalBudget ? 'text-status-danger' : 'text-primary-600'
+            }`}
+          >
+            {formatCents(totalSpent, currency)}
+          </p>
+        </div>
+      </div>
 
-        <div className="space-y-2">
-          <span className="text-xs font-semibold text-text-muted">Category — tap to pick</span>
-          <Chips options={categoryChips} value={categoryId} onSelect={setCategoryId} />
-          {showNewCat ? (
-            <div className="flex items-end gap-2 pt-1">
-              <div className="w-14 shrink-0">
-                <Input value={newCatEmoji} onChange={(e) => setNewCatEmoji(e.target.value)} placeholder="🏷️" className="text-center" />
+      {categoriesLoading && categories.length === 0 ? (
+        <LoadingSpinner />
+      ) : (
+        <>
+          {/* Budgeted */}
+          <section className="pt-8">
+            <Eyebrow>Budgeted this {period}</Eyebrow>
+            {budgeted.length === 0 ? (
+              <p className="mt-3 text-sm text-text-muted">
+                No budgets set for this {period}. Tap “Set budget” on a category below.
+              </p>
+            ) : (
+              <div className="mt-3 divide-y divide-border-default">
+                {budgeted.map((c) => {
+                  const b = budgetByCat.get(c.id)!
+                  const spent = spendMap[c.id] ?? 0
+                  const pct = Math.min(100, Math.round((spent / b.amount_cents) * 100))
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => openSheet(c)}
+                      className="w-full py-4 text-left transition-colors hover:bg-primary-50/40"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <CategoryIcon icon={c.icon} />
+                          <p className="truncate font-semibold text-text-primary">{c.name}</p>
+                        </div>
+                        <p className="shrink-0 text-sm font-bold tabular-nums">
+                          {formatCents(spent, currency)}{' '}
+                          <span className="font-medium text-text-muted">
+                            / {formatCents(b.amount_cents, currency)}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="mt-2">
+                        <ProgressBar value={pct} color={pct >= 100 ? 'danger' : 'primary'} />
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
-              <div className="flex-1">
-                <Input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="New type" />
+            )}
+          </section>
+
+          {/* Not budgeted */}
+          {notBudgeted.length > 0 && (
+            <section className="pt-8">
+              <Eyebrow>Not budgeted this {period}</Eyebrow>
+              <div className="mt-3 divide-y divide-border-default">
+                {notBudgeted.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <CategoryIcon icon={c.icon} />
+                      <p className="truncate font-semibold text-text-primary">{c.name}</p>
+                    </div>
+                    <Button variant="outline" size="sm" className="shrink-0 rounded-full" onClick={() => openSheet(c)}>
+                      Set budget
+                    </Button>
+                  </div>
+                ))}
               </div>
-              <Button variant="secondary" onClick={createNewCategory} disabled={!newCatName.trim()}>
-                Add
-              </Button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowNewCat(true)}
-              className="inline-flex items-center gap-1 text-sm font-semibold text-primary-600 hover:text-primary-700"
-            >
-              <Plus className="h-4 w-4" /> New type
-            </button>
+            </section>
+          )}
+
+          {/* Add a custom category (budget type) */}
+          <button
+            type="button"
+            onClick={() => setShowAddCategory(true)}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong py-3 text-sm font-semibold text-primary-600 transition-colors hover:bg-primary-50"
+          >
+            <Plus className="h-4 w-4" /> New category
+          </button>
+        </>
+      )}
+
+      {/* Set / edit budget sheet */}
+      <BottomSheet
+        isOpen={!!sheetCat}
+        onClose={closeSheet}
+        title={sheetCat ? `${sheetCat.icon ?? '🏷️'}  ${sheetCat.name} · ${period}` : ''}
+      >
+        <div className="space-y-3">
+          <Input
+            label={`Limit per ${period}`}
+            type="number"
+            inputMode="decimal"
+            value={amountInput}
+            onChange={(e) => setAmountInput(e.target.value)}
+            placeholder="0.00"
+          />
+          <Button variant="primary" fullWidth onClick={saveBudget} disabled={toCents(amountInput) <= 0}>
+            {existingBudget ? 'Update budget' : 'Set budget'}
+          </Button>
+          {existingBudget && (
+            <Button variant="ghost" fullWidth onClick={removeBudget} className="text-status-danger">
+              Remove budget
+            </Button>
           )}
         </div>
+      </BottomSheet>
 
-        <Button variant="primary" fullWidth onClick={submit} disabled={toCents(amount) <= 0}>
-          Add budget
-        </Button>
-      </AddSection>
+      <AddCategorySheet
+        isOpen={showAddCategory}
+        onClose={() => setShowAddCategory(false)}
+        onCreated={(c) => openSheet(c)}
+      />
     </div>
   )
 }

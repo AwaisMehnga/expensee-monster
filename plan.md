@@ -20,7 +20,7 @@ Separate screens provide deep analytics and an AI Money Coach to help you optimi
    - Big animated **Monster Mascot** showing state (`idle`, `listening`, `thinking`, `asking`, `happy`, `concerned`).
    - Large voice record trigger (mic button).
    - Interactive clarification dialog & review draft card (manual & voice correction).
-   - **Budget Summary Bar**: Total budget, current spent, remaining balance, and daily pacing tip from the Monster.
+   - **Budget Summary Bar**: This month's **total budget** (sum of the month's per-category budgets), current spent, remaining balance, and daily pacing tip from the Monster. If no budgets are set, shows a "Set a budget" prompt → Wallet.
 
 2. **Expenses (Analytics & Filtering)**:
    - Full list of logged expenses with search and quick actions.
@@ -32,10 +32,11 @@ Separate screens provide deep analytics and an AI Money Coach to help you optimi
    - Smart spending reduction suggestions.
    - Unnecessary expense detector: AI flags suspicious or wasteful expenses and asks the user to confirm/mark them as unnecessary.
 
-4. **Wallet (Accounts & Budgets)**:
-   - **Accounts**: Add/edit accounts (cash, bank, card, wallet) each with an opening balance. Current balance is **computed from the ledger** (opening + transfers in − transfers out − expenses), never stored, so it can't drift.
-   - **Transfers**: Move money from one account to another (records a `transfers` row; no expense created).
-   - **Budget management**: Create/edit/delete budgets for any period (day/week/month/year/custom), overall or per category — this is where the budgets surfaced on Home are set.
+4. **Wallet** — three tabs (`Accounts · Budgets · Categories`):
+   - **Accounts**: Add/edit accounts (cash, bank, card, wallet) each with an opening balance. Current balance is **computed from the ledger** (opening + transfers in − transfers out − expenses), never stored, so it can't drift. Add-account and **Transfer money** open as **bottom-sheet overlays** (blurred backdrop).
+   - **Budgets**: A **period toggle (Day · Week · Month)** + a navigator that steps by that period. Two-column **Total budget / Total spent** for the active window. Every category is listed — those with a budget show a progress meter (`spent / limit`), those without show a **"Set budget"** action. Setting/editing a budget opens a **bottom sheet** (limit for the selected period). Budgets are **per-category** (`period_type` = day/week/month, `category_id` = the category). A **"New category"** button opens the reusable **add-category bottom sheet**.
+   - **Categories**: List of budget/expense categories (emoji + name); add via the same bottom sheet, delete with a confirm warning (expenses become **Uncategorized**, not deleted).
+   - **Transfers**: Move money between accounts (records a `transfers` row; no expense created).
 
 5. **Settings**:
    - **Region**: Country + currency (currency defaulted from country), locale/number formatting, week-start day (drives the weekly budget window).
@@ -102,7 +103,10 @@ Categories auto-created or selected during extraction.
 | `created_at` | `TEXT` | ISO 8601 Timestamp |
 
 ### Table: `budgets`
-Budget rules per timeframe and category.
+Budget rules per timeframe and category. The schema keeps `year`/`custom` and
+`NULL` (overall) for flexibility, but the **Budgets UI currently creates
+per-category budgets for `day` / `week` / `month`** (one budget per category per
+period). Home sums the month's per-category budgets for its summary.
 
 | Column | Type | Constraints / Description |
 |---|---|---|
