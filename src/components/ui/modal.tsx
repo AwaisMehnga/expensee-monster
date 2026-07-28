@@ -101,17 +101,35 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   title,
   children,
 }) => {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    if (isOpen) {
+      document.body.style.overflow = 'hidden'
+      window.addEventListener('keydown', onKey)
+    }
+    return () => {
+      document.body.style.overflow = 'unset'
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [isOpen, onClose])
+
   if (!isOpen) return null
 
   return createPortal(
     <div className="fixed inset-0 z-60 flex flex-col justify-end">
+      {/* Blurred backdrop */}
       <div
-        className="fixed inset-0 bg-overlay-backdrop transition-opacity"
+        className="fixed inset-0 bg-overlay-backdrop backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full bg-surface-raised border-t border-border-default shadow-xl rounded-t-3xl p-6 animate-slide-up max-h-[85vh] overflow-y-auto">
-        <div className="w-12 h-1.5 bg-border-default rounded-full mx-auto mb-4" />
-        {title && <h3 className="text-lg font-bold text-text-primary mb-4 text-center">{title}</h3>}
+      {/* Sheet */}
+      <div className="relative z-10 mx-auto max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-t-3xl border-t border-border-default bg-surface-raised p-6 shadow-xl animate-slide-up">
+        <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-border-default" />
+        {title && (
+          <h3 className="mb-4 text-center text-lg font-bold tracking-tight text-text-primary">{title}</h3>
+        )}
         {children}
       </div>
     </div>,

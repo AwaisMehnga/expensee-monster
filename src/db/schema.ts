@@ -73,4 +73,24 @@ export const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   );
   `,
+
+  // v3 — seed default expense/budget categories (INSERT OR IGNORE keeps it idempotent-safe)
+  `
+  INSERT OR IGNORE INTO categories (name, icon, created_at) VALUES
+    ('Food',          '🍔', datetime('now')),
+    ('Groceries',     '🛒', datetime('now')),
+    ('Transport',     '🚗', datetime('now')),
+    ('Shopping',      '🛍️', datetime('now')),
+    ('Housing',       '🏠', datetime('now')),
+    ('Bills',         '💡', datetime('now')),
+    ('Entertainment', '🎬', datetime('now')),
+    ('Health',        '🏥', datetime('now')),
+    ('Travel',        '✈️', datetime('now')),
+    ('Education',     '📚', datetime('now')),
+    ('Fitness',       '💪', datetime('now')),
+    ('Coffee',        '☕', datetime('now')),
+    ('Gifts',         '🎁', datetime('now')),
+    ('Savings',       '💰', datetime('now')),
+    ('Other',         '📦', datetime('now'));
+  `,
 ]

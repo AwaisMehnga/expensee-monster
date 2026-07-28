@@ -9,7 +9,7 @@ export function Screen({
   className?: string
 }) {
   return (
-    <div className="min-h-screen bg-surface-base px-4 pb-28 pt-5 text-text-primary sm:px-6">
+    <div className="min-h-screen bg-surface-base px-4 pb-36 pt-5 text-text-primary sm:px-6">
       <div className={`mx-auto w-full max-w-xl ${className}`}>{children}</div>
     </div>
   )
